@@ -135,13 +135,14 @@
 
 (defn clear-votes
   [svg-groups]
-  (doseq [g [:proposal]]
+  (doseq [g [:proposal :pre-vote]]
     (-> (g svg-groups)
         (.selectAll "circle")
         (.remove))))
 
 (defn update-graphics
   [svg-groups _ _ old-state new-state]
+  (prn new-state)
   (let [current-validators (:validators new-state)
         n (count current-validators)
         proposer-idx (:proposer-idx new-state)
@@ -149,12 +150,15 @@
         new-proposal (and (nil? (:proposal old-state)) (some? (:proposal new-state)))
         old-hr (select-keys old-state [:height :round])
         new-hr (select-keys new-state [:height :round])
-        new-round (not= old-hr new-hr)]
+        new-round (not= old-hr new-hr)
+        new-pre-votes (:pre-votes new-state)]
     (create-circles (:validators svg-groups) current-validators proposer-idx locs)
     (if new-round
       (clear-votes svg-groups))
     (if new-proposal
       (create-vote (:proposal svg-groups) proposer-idx :proposal locs center))
+    (doseq [i new-pre-votes] 
+      (create-vote (:pre-vote svg-groups) i :pre-vote locs center))
   ))
 
 (defn generate-random-validator
@@ -164,14 +168,16 @@
    })
 
 (defn set-random-state
-  []
-  (let [n (+ 4 (rand-int 10))
-        vs (vec (for [i (range n)] (generate-random-validator (str i))))
+  [n]
+  (let [vs (vec (for [i (range n)] (generate-random-validator (str i))))
         proposer-idx (rand-int n)
         h 0
-        r 0
-        ]
-    (reset! app-state {:validators vs :proposer-idx proposer-idx :height 0 :round 0})))
+        r 0]
+    (reset! app-state {:validators vs 
+                       :proposer-idx proposer-idx 
+                       :height 0 
+                       :round 0
+                       :pre-votes #{}})))
 
 (defn compute-random-proposer
   [state]
@@ -179,17 +185,34 @@
     (assoc state :proposal "blah")
     (let [n (count (:validators state))
           p (:proposer-idx state)
-          r (repeatedly #(rand-int n))
-          new-p (first (filter #(not= p %) r))
+          new-p (rand-int n)
           h (:height state)]
-      (assoc state :proposer-idx (rand-int n) :proposal nil :height (+ h 1)))))
+      (assoc state 
+             :proposer-idx new-p 
+             :proposal nil 
+             :height (+ h 1)
+             :pre-votes #{}))))
 
 (defn set-random-proposer
   []
   (swap! app-state compute-random-proposer))
 
-;(defonce rand-state (js/setInterval set-random-state 10000))
+(defn compute-random-vote
+  [state vote-type]
+  (if (nil? (:proposal state))
+    state
+    (let [n (count (:validators state))
+          v (rand-int n)
+          votes (vote-type state)
+          new-votes (conj votes v)]
+      (assoc state vote-type new-votes))))
+
+(defn add-random-vote
+  [vote-type]
+  (swap! app-state #(compute-random-vote % vote-type)))
+
 (defonce rand-prop (js/setInterval set-random-proposer 1000))
+(defonce rand-pre-vote (js/setInterval #(add-random-vote :pre-votes) 200))
 
 (defn ^:export main []
   (let [svg-main (append-svg "#app" 1000 1000)
@@ -198,8 +221,9 @@
                     :pre-vote (.append svg-main "g")
                     }
         ]
-    (set-random-state)
     (add-watch app-state :update-header (partial update-graphics svg-groups))
+    (set-random-state 10)
+    (js/setTimeout set-random-proposer 50)
   ))
 
 (defn ^:after-load on-reload []
