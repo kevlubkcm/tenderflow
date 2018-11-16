@@ -101,65 +101,86 @@
           (.attr "cx" (fn [[x _] _] x))
           (.attr "cy" (fn [[_ y] _] y))
           (.attr "r" (fn [_ _] 10))
-          (.attr "fill" (fn [_ i] (if (= i proposer-idx) "green" "red"))))
-  )
-)
+          (.attr "fill" (fn [_ i] (if (= i proposer-idx) "green" "red"))))))
 
 (def vote-styles
-  {:proposal [5 "black"]
+  {:proposal [30 "red"]
    :pre-vote [3 "blue"]
    :pre-commit [2 "green"]})
 
-(defn create-vote
-  [svg idx vote-type locs [vote-x vote-y]]
+(defn create-proposal
+  [svg idx locs [vote-x vote-y]]
   (let [[val-x val-y] (nth locs idx)
-        [r fill] (vote-type vote-styles)]
+        [r fill] (:proposal vote-styles)
+        s (/ r 2)]
     (-> svg
-        (.selectAll "circle")
-        (.remove))
-    (-> svg
-        (.append "circle")
-          (.attr "cx" val-x)
-          (.attr "cy" val-y)
-          (.attr "r" r)
-          (.attr "fill" fill))
-    (-> svg
-        (.select "circle")
+        (.append "rect")
+          (.attr "x" (- val-x s))
+          (.attr "y" (- val-y s))
+          (.attr "width" r)
+          (.attr "height" r)
+          (.attr "fill" fill)
         (.transition)
-          (.attr "cx" vote-x)
-          (.attr "cy" vote-y))
-    ))
+          (.attr "x" (- vote-x s))
+          (.attr "y" (- vote-y s)))))
 
-(def radius 300)
+(defn create-votes
+  [svg idxs vote-type val-locs validators vote-locs]
+  (let [addrs (map :address validators)
+        data (vec (map vector addrs val-locs vote-locs))
+        data (into-array (for [i idxs] (data i)))
+        [r color] (vote-type vote-styles)
+        svg (-> svg 
+                (.selectAll "circle") 
+                (.data data (fn [d _ _] d)))]
+    (-> svg
+        (.enter)
+          (.append "circle")
+          (.attr "cx" (fn [[_ [x _] _]] x))
+          (.attr "cy" (fn [[_ [_ y] _]] y))
+          (.attr "r" r)
+          (.attr "fill" color)
+          (.transition)
+            (.attr "cx" (fn [[_ _ [x _]]] x))
+            (.attr "cy" (fn [[_ _ [_ y]]] y)))))
+
+(def val-radius 300)
+(def vote-radius 20)
 (def center [500 500])
+
+(defn clear-proposal
+  [svg-groups]
+  (-> (:proposal svg-groups)
+      (.selectAll "rect")
+      (.remove)))
 
 (defn clear-votes
   [svg-groups]
-  (doseq [g [:proposal :pre-vote]]
+  (doseq [g [:pre-vote]]
     (-> (g svg-groups)
         (.selectAll "circle")
         (.remove))))
 
 (defn update-graphics
   [svg-groups _ _ old-state new-state]
-  (prn new-state)
   (let [current-validators (:validators new-state)
         n (count current-validators)
         proposer-idx (:proposer-idx new-state)
-        locs (compute-locations center n radius)
+        val-locs (compute-locations center n val-radius)
+        vote-locs (compute-locations center n vote-radius)
         new-proposal (and (nil? (:proposal old-state)) (some? (:proposal new-state)))
         old-hr (select-keys old-state [:height :round])
         new-hr (select-keys new-state [:height :round])
         new-round (not= old-hr new-hr)
-        new-pre-votes (:pre-votes new-state)]
-    (create-circles (:validators svg-groups) current-validators proposer-idx locs)
+        pre-votes (:pre-votes new-state)]
+    (create-circles (:validators svg-groups) current-validators proposer-idx val-locs)
     (if new-round
-      (clear-votes svg-groups))
+      (do
+        (clear-proposal svg-groups)
+        (clear-votes svg-groups)))
     (if new-proposal
-      (create-vote (:proposal svg-groups) proposer-idx :proposal locs center))
-    (doseq [i new-pre-votes] 
-      (create-vote (:pre-vote svg-groups) i :pre-vote locs center))
-  ))
+      (create-proposal (:proposal svg-groups) proposer-idx val-locs center))
+    (create-votes (:pre-vote svg-groups) pre-votes :pre-vote val-locs current-validators vote-locs)))
 
 (defn generate-random-validator
   [addr]
@@ -211,7 +232,7 @@
   [vote-type]
   (swap! app-state #(compute-random-vote % vote-type)))
 
-(defonce rand-prop (js/setInterval set-random-proposer 1000))
+(defonce rand-prop (js/setInterval set-random-proposer 10000))
 (defonce rand-pre-vote (js/setInterval #(add-random-vote :pre-votes) 200))
 
 (defn ^:export main []
