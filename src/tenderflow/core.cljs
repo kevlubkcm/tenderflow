@@ -84,7 +84,7 @@
 (def vote-radius 20)
 (def center [500 500])
 (def blocks 10)
-(def blocks-head [100 900])
+(def blocks-head [900 700])
 (def block-space 50)
 (def vote-styles
   {:proposal [30 "red"]
@@ -96,10 +96,8 @@
   [head spacing n]
   (let [[x head-y] head
         dys (range n)
-        dys (map #(* % spacing) dys)
-        ]
-    (map #(vector x (- head-y %)) dys)
-  ))
+        dys (map #(* % spacing) dys)]
+    (map #(vector x (- head-y %)) dys)))
 
 
 (defn draw-blockchain
@@ -121,9 +119,15 @@
             (.attr "height" r)
             (.attr "fill" fill)
           (.transition)
-            (.attr "x" (fn [_ [x _]] x))
-            (.attr "y" (fn [_ [_ y]] y))))
-  )
+            (.attr "x" (fn [[_ [x _]]] x))
+            (.attr "y" (fn [[_ [_ y]]] y)))
+    (-> svg
+        (.transition)
+          (.attr "x" (fn [[_ [x _]]] x))
+          (.attr "y" (fn [[_ [_ y]]] y)))
+    (-> svg
+        (.exit)
+          (.remove))))
 
 (defn draw-validators
   [svg validators proposer-idx locs]
@@ -201,12 +205,6 @@
         (.exit)
           (.remove))))
 
-(defn clear-proposal
-  [svg-groups]
-  (-> (:proposal svg-groups)
-      (.selectAll "rect")
-      (.remove)))
-
 (defn update-graphics
   [svg-groups _ _ _ new-state]
   (let [current-validators (:validators new-state)
@@ -216,6 +214,7 @@
         vote-locs (compute-locations center n vote-radius)
         {:keys [height round step pre-votes pre-commits proposal]} new-state]
     (draw-validators (:validators svg-groups) current-validators proposer-idx val-locs)
+    (draw-blockchain (:blockchain svg-groups) (range (- height 1) 0 -1) center)
     (draw-proposal (:proposal svg-groups) proposal height round proposer-idx val-locs center)
     (draw-votes (:votes svg-groups) pre-votes pre-commits val-locs vote-locs height)))
 
@@ -277,8 +276,7 @@
         svg-groups {:validators (.append svg-main "g")
                     :proposal (.append svg-main "g")
                     :votes (.append svg-main "g")
-                    }
-        ]
+                    :blockchain (.append svg-main "g")}]
     (add-watch app-state :update-header (partial update-graphics svg-groups))
     (set-random-state 10)
     (js/setTimeout set-random-proposer 50)
