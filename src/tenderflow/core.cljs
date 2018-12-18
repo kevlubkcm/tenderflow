@@ -79,7 +79,53 @@
     [(+ x (* r (Math/cos o))) 
      (+ y (* r (Math/sin o)))])))
 
-(defn create-circles
+
+(def val-radius 300)
+(def vote-radius 20)
+(def center [500 500])
+(def blocks 10)
+(def blocks-head [100 900])
+(def block-space 50)
+(def vote-styles
+  {:proposal [30 "red"]
+   :pre-vote [3 "blue"]
+   :pre-commit [2 "green"]})
+
+
+(defn block-locations
+  [head spacing n]
+  (let [[x head-y] head
+        dys (range n)
+        dys (map #(* % spacing) dys)
+        ]
+    (map #(vector x (- head-y %)) dys)
+  ))
+
+
+(defn draw-blockchain
+  [svg heights [prop-x prop-y]]
+  (let [locs (block-locations blocks-head block-space (count heights))
+        data (into-array (map vector heights locs))
+        [r _] (:proposal vote-styles)
+        s (/ r 2)
+        fill "green"
+        svg (-> svg 
+                (.selectAll "rect") 
+                (.data data (fn [[h _]] h)))]
+    (-> svg
+        (.enter)
+          (.append "rect")
+            (.attr "x" (- prop-x s))
+            (.attr "y" (- prop-y s))
+            (.attr "width" r)
+            (.attr "height" r)
+            (.attr "fill" fill)
+          (.transition)
+            (.attr "x" (fn [_ [x _]] x))
+            (.attr "y" (fn [_ [_ y]] y))))
+  )
+
+(defn draw-validators
   [svg validators proposer-idx locs]
   (let [data (into-array locs)
         addrs (vec (map :address validators))
@@ -103,50 +149,57 @@
           (.attr "r" (fn [_ _] 10))
           (.attr "fill" (fn [_ i] (if (= i proposer-idx) "green" "red"))))))
 
-(def vote-styles
-  {:proposal [30 "red"]
-   :pre-vote [3 "blue"]
-   :pre-commit [2 "green"]})
-
-(defn create-proposal
-  [svg idx locs [vote-x vote-y]]
+(defn draw-proposal
+  [svg prop height round idx locs [vote-x vote-y]]
   (let [[val-x val-y] (nth locs idx)
         [r fill] (:proposal vote-styles)
-        s (/ r 2)]
+        s (/ r 2)
+        data (if (nil? prop) [] [(str height "#" round)])
+        data (into-array data)
+        svg (-> svg 
+                (.selectAll "rect") 
+                (.data data (fn [h] h)))]
     (-> svg
-        (.append "rect")
-          (.attr "x" (- val-x s))
-          (.attr "y" (- val-y s))
-          (.attr "width" r)
-          (.attr "height" r)
-          (.attr "fill" fill)
-        (.transition)
-          (.attr "x" (- vote-x s))
-          (.attr "y" (- vote-y s)))))
+        (.enter)
+          (.append "rect")
+            (.attr "x" (- val-x s))
+            (.attr "y" (- val-y s))
+            (.attr "width" r)
+            (.attr "height" r)
+            (.attr "fill" fill)
+          (.transition)
+            (.attr "x" (- vote-x s))
+            (.attr "y" (- vote-y s)))
+    (-> svg
+        (.exit)
+          (.remove))))
 
-(defn create-votes
-  [svg idxs vote-type val-locs validators vote-locs]
-  (let [addrs (map :address validators)
-        data (vec (map vector addrs val-locs vote-locs))
-        data (into-array (for [i idxs] (data i)))
-        [r color] (vote-type vote-styles)
+(defn vote-id
+  [idx height vote-type]
+  (str height "#" idx "#" vote-type))
+
+(defn draw-votes
+  [svg pre-votes pre-commits val-locs vote-locs height]
+  (let [locs (vec (map vector val-locs vote-locs))
+        pre-votes (for [i pre-votes] [(vote-id i height 0) (locs i) (:pre-vote vote-styles)])
+        pre-commits (for [i pre-commits] [(vote-id i height 1) (locs i) (:pre-commit vote-styles)])
+        data (into-array (concat pre-votes pre-commits))
         svg (-> svg 
                 (.selectAll "circle") 
-                (.data data (fn [d _ _] d)))]
+                (.data data (fn [[d _ _]] d)))]
     (-> svg
         (.enter)
           (.append "circle")
-          (.attr "cx" (fn [[_ [x _] _]] x))
-          (.attr "cy" (fn [[_ [_ y] _]] y))
-          (.attr "r" r)
-          (.attr "fill" color)
+          (.attr "cx" (fn [[_ [[x _] _] _]] x))
+          (.attr "cy" (fn [[_ [[_ y] _] _]] y))
+          (.attr "r" (fn [[_ _ [r _]]] r))
+          (.attr "fill" (fn [[_ _ [_ f]]] f))
           (.transition)
-            (.attr "cx" (fn [[_ _ [x _]]] x))
-            (.attr "cy" (fn [[_ _ [_ y]]] y)))))
-
-(def val-radius 300)
-(def vote-radius 20)
-(def center [500 500])
+            (.attr "cx" (fn [[_ [_ [x _]] _]] x))
+            (.attr "cy" (fn [[_ [_ [_ y]] _]] y)))
+    (-> svg
+        (.exit)
+          (.remove))))
 
 (defn clear-proposal
   [svg-groups]
@@ -154,33 +207,17 @@
       (.selectAll "rect")
       (.remove)))
 
-(defn clear-votes
-  [svg-groups]
-  (doseq [g [:pre-vote]]
-    (-> (g svg-groups)
-        (.selectAll "circle")
-        (.remove))))
-
 (defn update-graphics
-  [svg-groups _ _ old-state new-state]
+  [svg-groups _ _ _ new-state]
   (let [current-validators (:validators new-state)
         n (count current-validators)
         proposer-idx (:proposer-idx new-state)
         val-locs (compute-locations center n val-radius)
         vote-locs (compute-locations center n vote-radius)
-        new-proposal (and (nil? (:proposal old-state)) (some? (:proposal new-state)))
-        old-hr (select-keys old-state [:height :round])
-        new-hr (select-keys new-state [:height :round])
-        new-round (not= old-hr new-hr)
-        pre-votes (:pre-votes new-state)]
-    (create-circles (:validators svg-groups) current-validators proposer-idx val-locs)
-    (if new-round
-      (do
-        (clear-proposal svg-groups)
-        (clear-votes svg-groups)))
-    (if new-proposal
-      (create-proposal (:proposal svg-groups) proposer-idx val-locs center))
-    (create-votes (:pre-vote svg-groups) pre-votes :pre-vote val-locs current-validators vote-locs)))
+        {:keys [height round step pre-votes pre-commits proposal]} new-state]
+    (draw-validators (:validators svg-groups) current-validators proposer-idx val-locs)
+    (draw-proposal (:proposal svg-groups) proposal height round proposer-idx val-locs center)
+    (draw-votes (:votes svg-groups) pre-votes pre-commits val-locs vote-locs height)))
 
 (defn generate-random-validator
   [addr]
@@ -239,7 +276,7 @@
   (let [svg-main (append-svg "#app" 1000 1000)
         svg-groups {:validators (.append svg-main "g")
                     :proposal (.append svg-main "g")
-                    :pre-vote (.append svg-main "g")
+                    :votes (.append svg-main "g")
                     }
         ]
     (add-watch app-state :update-header (partial update-graphics svg-groups))
