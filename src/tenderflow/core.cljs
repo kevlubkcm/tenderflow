@@ -9,8 +9,9 @@
     [wscljs.format :as fmt]
    ))
 
-(def host "localhost:26657")
+(def node-address "localhost:26657")
 (defonce app-state (atom {}))
+(defonce websocket (atom nil))
 
 (defn indices [pred coll]
    (keep-indexed #(when (pred %2) %1) coll))
@@ -28,7 +29,7 @@
 
 (defn get-consensus-dump
   []
-  (go (let [url (str "http://" host "/dump_consensus_state")
+  (go (let [url (str "http://" node-address "/dump_consensus_state")
             resp (<! (http/get url {:with-credentials? false}))
             d (parse-consensus-dump (:body resp))]
         (reset! app-state d))))
@@ -265,22 +266,6 @@
 ; (defonce rand-prop (js/setInterval set-random-proposer 10000))
 ; (defonce rand-pre-vote (js/setInterval #(add-random-vote :pre-votes) 200))
 
-(defn ^:export main []
-  (let [svg-main (append-svg "#app" 1000 1000)
-        svg-groups {:validators (.append svg-main "g")
-                    :proposal (.append svg-main "g")
-                    :votes (.append svg-main "g")
-                    :blockchain (.append svg-main "g")}]
-    (add-watch app-state :update-header (partial update-graphics svg-groups))
-    ;(set-random-state 10)
-    ;(js/setTimeout set-random-proposer 50)
-    (js/setTimeout get-consensus-dump 50)
-  ))
-
-(defn ^:after-load on-reload []
-  ;; (swap! app-state update-in [:__figwheel_counter] inc)
-)
-
 (defn subscribe-msg
   [id evt]
   {:jsonrpc "2.0" 
@@ -293,6 +278,12 @@
   (let [msg (subscribe-msg id evt)]
     (prn (str "Subscribing: " msg))
     (ws/send socket msg fmt/json)))
+
+(defn subscribe-all
+  [socket]
+  (subscribe socket "0" "CompleteProposal")
+  (subscribe socket "1" "Vote")
+  (subscribe socket "2" "NewRound"))
 
 (defn handle-new-round
   [d]
@@ -354,10 +345,27 @@
       (prn (str "Unhandled Type: " event-type "\n" data)))))
 
 (def handlers {:on-message handle-message
-               :on-open #(prn "opening connection")})
+               :on-open #(subscribe-all @websocket)
+               :on-close #(reset! websocket nil)})
 
-(defonce socket (ws/create (str "ws://" host "/websocket") handlers))
-(defonce subscribe-proposals (subscribe socket "0" "CompleteProposal"))
-(defonce subscribe-votes (subscribe socket "1" "Vote"))
-(defonce subscribe-new-round (subscribe socket "2" "NewRound"))
+(defn connect-to-websocket
+  [host]
+  (reset! websocket (ws/create (str "ws://" host "/websocket") handlers)))
+
+(defn ^:export main []
+  (let [svg-main (append-svg "#app" 1000 1000)
+        svg-groups {:validators (.append svg-main "g")
+                    :proposal (.append svg-main "g")
+                    :votes (.append svg-main "g")
+                    :blockchain (.append svg-main "g")}]
+    (add-watch app-state :update-header (partial update-graphics svg-groups))
+    ;(set-random-state 10)
+    ;(js/setTimeout set-random-proposer 50)
+    (js/setTimeout get-consensus-dump 50)
+    (js/setTimeout #(connect-to-websocket node-address) 50)
+  ))
+
+(defn ^:after-load on-reload []
+  ;; (swap! app-state update-in [:__figwheel_counter] inc)
+)
 
