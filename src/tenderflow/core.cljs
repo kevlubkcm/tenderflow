@@ -123,26 +123,26 @@
 
 (defn draw-validators
   [svg validators proposer-idx locs]
-  (let [data (into-array locs)
-        addrs (vec (map :address validators))
+  (let [zipped (map vector validators locs)
+        data (into-array zipped)
         svg (-> svg 
                 (.selectAll "circle") 
-                (.data data (fn [d i] (get addrs i))))]
+                (.data data (fn [[v _]] (:address v))))]
     (-> svg
         (.exit)
           (.remove))
     (-> svg
         (.enter)
           (.append "circle")
-          (.attr "cx" (fn [[x _] _] x))
-          (.attr "cy" (fn [[_ y] _] y))
-          (.attr "r" (fn [_ _] 10))
+          (.attr "cx" (fn [[_ [x _]]] x))
+          (.attr "cy" (fn [[_ [_ y]]] y))
+          (.attr "r" 10) 
           (.attr "fill" (fn [_ i] (if (= i proposer-idx) "green" "red"))))
     (-> svg
         (.transition)
-          (.attr "cx" (fn [[x _] _] x))
-          (.attr "cy" (fn [[_ y] _] y))
-          (.attr "r" (fn [_ _] 10))
+          (.attr "cx" (fn [[_ [x _]]] x))
+          (.attr "cy" (fn [[_ [_ y]]] y))
+          (.attr "r" 10)
           (.attr "fill" (fn [_ i] (if (= i proposer-idx) "green" "red"))))))
 
 (defn draw-proposal
@@ -208,7 +208,8 @@
         complete-blocks (take blocks-max (range height first-height -1))]
     (draw-validators (:validators svg-groups) current-validators proposer-idx val-locs)
     (draw-blockchain (:blockchain svg-groups) complete-blocks center)
-    (draw-proposal (:proposal svg-groups) proposal height round proposer-idx val-locs center)
+    (if (some? proposer-idx)
+      (draw-proposal (:proposal svg-groups) proposal height round proposer-idx val-locs center))
     (draw-votes (:votes svg-groups) pre-votes pre-commits val-locs vote-locs height)))
 
 (defn generate-random-validator
