@@ -19,25 +19,17 @@
     (let [s (get-in msg [:result :round_state])
           {:keys [height round step]} s
           val-info (:validators s)
-          validators (map #(select-keys % [:address :voting_power]) (:validators val-info))
-          proposer-addr (get-in val-info [:proposer :address])
-          proposer-idx (first (indices #(= (:address %) proposer-addr) validators))
-          votes (first (filter #(= (:round %) round) (:votes val-info)))
-          pre-votes (:prevotes votes)
-          pre-commits (:precommits votes)]
+          validators (map #(select-keys % [:address :voting_power]) (:validators val-info))]
       {:height height
+       :first-height height
        :round round
        :step step
-       :validators validators
-       :proposer-idx proposer-idx
-       :proposal nil
-       :pre-votes pre-votes
-       :pre-commits pre-commits}))
+       :validators validators}))
 
 (defn get-consensus-dump
   []
   (go (let [url (str "http://" host "/dump_consensus_state")
-            resp (<! (http/get url))
+            resp (<! (http/get url {:with-credentials? false}))
             d (parse-consensus-dump (:body resp))]
         (reset! app-state d))))
 
@@ -83,7 +75,7 @@
 (def val-radius 300)
 (def vote-radius 20)
 (def center [500 500])
-(def blocks 10)
+(def blocks-max 10)
 (def blocks-head [900 700])
 (def block-space 50)
 (def vote-styles
@@ -212,9 +204,10 @@
         proposer-idx (:proposer-idx new-state)
         val-locs (compute-locations center n val-radius)
         vote-locs (compute-locations center n vote-radius)
-        {:keys [height round step pre-votes pre-commits proposal]} new-state]
+        {:keys [height round step pre-votes pre-commits proposal first-height]} new-state
+        complete-blocks (take blocks-max (range height first-height -1))]
     (draw-validators (:validators svg-groups) current-validators proposer-idx val-locs)
-    (draw-blockchain (:blockchain svg-groups) (range (- height 1) 0 -1) center)
+    (draw-blockchain (:blockchain svg-groups) complete-blocks center)
     (draw-proposal (:proposal svg-groups) proposal height round proposer-idx val-locs center)
     (draw-votes (:votes svg-groups) pre-votes pre-commits val-locs vote-locs height)))
 
@@ -268,8 +261,8 @@
   [vote-type]
   (swap! app-state #(compute-random-vote % vote-type)))
 
-(defonce rand-prop (js/setInterval set-random-proposer 10000))
-(defonce rand-pre-vote (js/setInterval #(add-random-vote :pre-votes) 200))
+; (defonce rand-prop (js/setInterval set-random-proposer 10000))
+; (defonce rand-pre-vote (js/setInterval #(add-random-vote :pre-votes) 200))
 
 (defn ^:export main []
   (let [svg-main (append-svg "#app" 1000 1000)
@@ -278,8 +271,9 @@
                     :votes (.append svg-main "g")
                     :blockchain (.append svg-main "g")}]
     (add-watch app-state :update-header (partial update-graphics svg-groups))
-    (set-random-state 10)
-    (js/setTimeout set-random-proposer 50)
+    ;(set-random-state 10)
+    ;(js/setTimeout set-random-proposer 50)
+    (js/setTimeout get-consensus-dump 50)
   ))
 
 (defn ^:after-load on-reload []
@@ -297,11 +291,72 @@
   [socket id evt]
   (let [msg (subscribe-msg id evt)]
     (prn (str "Subscribing: " msg))
-    (ws/send socket (subscribe-msg id evt) fmt/json)))
+    (ws/send socket msg fmt/json)))
 
-#_(def handlers {:on-message dispatch-ws-event
+(defn handle-new-round
+  [d]
+  (let [{:keys [height round step]} d
+        proposer-idx (get-in d [:proposer :index])
+        proposer-idx (js/parseInt proposer-idx)
+        height (js/parseInt height)
+        round (js/parseInt round)]
+    (swap! app-state assoc 
+           :height height 
+           :round round 
+           :step step 
+           :proposer-idx proposer-idx
+           :proposal nil
+           :pre-votes []
+           :pre-commits [])))
+
+(defn handle-complete-proposal
+  [d]
+  (let [proposal (get-in d [:block_id :hash])]
+    ; TODO: check that height and round match
+    (swap! app-state assoc :proposal proposal)))
+
+(def vote-type-map
+  {1 :pre-votes
+   2 :pre-commits})
+
+(defn add-vote
+  [state vote-type idx]
+  (let [old-votes (vote-type state)
+        new-votes (conj old-votes idx)]
+    (assoc state vote-type new-votes)))
+
+(defn handle-vote
+  [d]
+  (let [d (:Vote d)
+        idx (:validator_index d)
+        idx (js/parseInt idx)
+        vote-type (get vote-type-map (:type d))]
+    (swap! app-state #(add-vote % vote-type idx))))
+
+
+(def event-handlers
+  {"tendermint/event/NewRound" handle-new-round
+   "tendermint/event/CompleteProposal" handle-complete-proposal
+   "tendermint/event/Vote" handle-vote})
+
+(defn handle-message
+  [e]
+  (let [data (.-data e)
+        data (.parse js/JSON data)
+        data (js->clj data :keywordize-keys true)
+        data (get-in data [:result :data])
+        event-type (:type data)
+        handler (get event-handlers event-type)
+        data (:value data)]
+    (if (some? handler)
+      (handler data)
+      (prn (str "Unhandled Type: " event-type "\n" data)))))
+
+(def handlers {:on-message handle-message
                :on-open #(prn "opening connection")})
 
-;;(defonce socket (ws/create (str "ws://" host "/websocket") handlers))
-;;(defonce subscribe-proposals (subscribe socket "0" "CompleteProposal"))
-;;(defonce subscribe-votes (subscribe socket "1" "Vote"))
+(defonce socket (ws/create (str "ws://" host "/websocket") handlers))
+(defonce subscribe-proposals (subscribe socket "0" "CompleteProposal"))
+(defonce subscribe-votes (subscribe socket "1" "Vote"))
+(defonce subscribe-new-round (subscribe socket "2" "NewRound"))
+
