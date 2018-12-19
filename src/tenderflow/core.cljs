@@ -123,10 +123,16 @@
           (.remove))))
 
 (defn draw-validators
-  [svg validators proposer-idx locs]
+  [svg-base validators proposer-idx locs]
   (let [zipped (map vector validators locs)
         data (into-array zipped)
-        svg (-> svg 
+        attrs (fn [s] 
+                (-> s 
+                    (.attr "r" 10) 
+                    (.attr "cx" (fn [[_ [x _]]] x)) 
+                    (.attr "cy" (fn [[_ [_ y]]] y)) 
+                    (.attr "fill" (fn [_ i] (if (= i proposer-idx) "green" "red")))))
+        svg (-> svg-base
                 (.selectAll "circle") 
                 (.data data (fn [[v _]] (:address v))))]
     (-> svg
@@ -135,16 +141,23 @@
     (-> svg
         (.enter)
           (.append "circle")
-          (.attr "cx" (fn [[_ [x _]]] x))
-          (.attr "cy" (fn [[_ [_ y]]] y))
-          (.attr "r" 10) 
-          (.attr "fill" (fn [_ i] (if (= i proposer-idx) "green" "red"))))
+          (attrs)
+          (.on "mouseover" 
+               (fn [[d [x y]]] 
+                 (-> svg-base
+                     (.append "text")
+                        (.attr "id" (str "t-" (:address d)))
+                        (.attr "x" x)
+                        (.attr "y" y)
+                        (.text (:address d)))))
+          (.on "mouseout"
+               (fn [[d _]]
+                 (-> svg-base
+                     (.select (str "#t-" (:address d)))
+                     (.remove)))))
     (-> svg
         (.transition)
-          (.attr "cx" (fn [[_ [x _]]] x))
-          (.attr "cy" (fn [[_ [_ y]]] y))
-          (.attr "r" 10)
-          (.attr "fill" (fn [_ i] (if (= i proposer-idx) "green" "red"))))))
+          (attrs))))
 
 (defn draw-proposal
   [svg prop height round idx locs [vote-x vote-y]]
@@ -340,9 +353,8 @@
         event-type (:type data)
         handler (get event-handlers event-type)
         data (:value data)]
-    (if (some? handler)
-      (handler data)
-      (prn (str "Unhandled Type: " event-type "\n" data)))))
+    (if (some? event-type)
+      (handler data))))
 
 (def handlers {:on-message handle-message
                :on-open #(subscribe-all @websocket)
@@ -353,11 +365,12 @@
   (reset! websocket (ws/create (str "ws://" host "/websocket") handlers)))
 
 (defn ^:export main []
-  (let [svg-main (append-svg "#app" 1000 1000)
-        svg-groups {:validators (.append svg-main "g")
-                    :proposal (.append svg-main "g")
+  (let [svg-main (append-svg "#app" 1000 1500)
+        svg-groups {:proposal (.append svg-main "g")
                     :votes (.append svg-main "g")
-                    :blockchain (.append svg-main "g")}]
+                    :blockchain (.append svg-main "g") 
+                    :validators (.append svg-main "g")}
+        ]
     (add-watch app-state :update-header (partial update-graphics svg-groups))
     ;(set-random-state 10)
     ;(js/setTimeout set-random-proposer 50)
