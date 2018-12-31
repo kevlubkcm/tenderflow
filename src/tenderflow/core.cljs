@@ -21,9 +21,6 @@
            :value @value
            :on-change #(reset! value (-> % .-target .-value))}])
 
-(defn indices [pred coll]
-   (keep-indexed #(when (pred %2) %1) coll))
-
 (defn parse-consensus-dump [msg]
     (let [s (get-in msg [:result :round_state])
           {:keys [height round step]} s
@@ -60,34 +57,12 @@
       (.attr "height" height)
       (.attr "width" width)))
 
-(defn remove-svg [div-id]
-  (-> js/d3
-      (.selectAll (str div-id " svg"))
-      (.remove)))
-
-(defn update-header 
-  [svg _ _ old-state new-state]
-  (let [{:keys [height round step]} new-state
-        ]
-    (prn (str height "/" round "/" step))
-    (-> svg
-        (.selectAll "circle")
-        (.data (into-array [height round step]))
-        (.enter)
-        (.append "circle")
-        (.attr "cx" (fn [d i] d))
-        (.attr "cy" (fn [d i] i))
-        (.attr "r" (fn [d i] d))
-        )
-  ))
-
 (defn compute-locations
   [[x y] n r]
   (vec (for [i (range n)
         :let [o (* (/ i n) 2 Math/PI)]]
     [(+ x (* r (Math/cos o))) 
      (+ y (* r (Math/sin o)))])))
-
 
 (def val-radius 300)
 (def vote-radius 20)
@@ -100,14 +75,12 @@
    :pre-vote [3 "blue"]
    :pre-commit [2 "green"]})
 
-
 (defn block-locations
   [head spacing n]
   (let [[x head-y] head
         dys (range n)
         dys (map #(* % spacing) dys)]
     (map #(vector x (- head-y %)) dys)))
-
 
 (defn draw-blockchain
   [svg heights [prop-x prop-y]]
