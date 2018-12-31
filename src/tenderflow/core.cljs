@@ -7,11 +7,19 @@
     [cljs.core.async :refer [<!]]
     [wscljs.client :as ws]
     [wscljs.format :as fmt]
+    [reagent.core :as r]
    ))
 
-(def node-address "localhost:26657")
+(defonce r-node-address (r/atom "3.80.184.123:26657"))
+(defonce r-node-status (r/atom {}))
+
 (defonce app-state (atom {}))
 (defonce websocket (atom nil))
+
+(defn atom-input [value]
+  [:input {:type "text"
+           :value @value
+           :on-change #(reset! value (-> % .-target .-value))}])
 
 (defn indices [pred coll]
    (keep-indexed #(when (pred %2) %1) coll))
@@ -28,11 +36,19 @@
        :validators validators}))
 
 (defn get-consensus-dump
-  []
+  [node-address]
   (go (let [url (str "http://" node-address "/dump_consensus_state")
             resp (<! (http/get url {:with-credentials? false}))
             d (parse-consensus-dump (:body resp))]
         (reset! app-state d))))
+
+(defn get-node-status
+  [node-address]
+  (go (let [url (str "http://" node-address "/status")
+            resp (<! (http/get url {:with-credentials? false}))
+            info (get-in resp [:body :result :node_info])
+            {:keys [id network moniker]} info]
+        (reset! r-node-status {:id id :network network :moniker moniker}))))
 
 (defn get-app-element []
   (gdom/getElement "app"))
@@ -226,59 +242,6 @@
       (draw-proposal (:proposal svg-groups) proposal height round proposer-idx val-locs center))
     (draw-votes (:votes svg-groups) pre-votes pre-commits val-locs vote-locs height)))
 
-(defn generate-random-validator
-  [addr]
-  {:address addr
-   :voting_power (rand-int 100)
-   })
-
-(defn set-random-state
-  [n]
-  (let [vs (vec (for [i (range n)] (generate-random-validator (str i))))
-        proposer-idx (rand-int n)
-        h 0
-        r 0]
-    (reset! app-state {:validators vs 
-                       :proposer-idx proposer-idx 
-                       :height 0 
-                       :round 0
-                       :pre-votes #{}})))
-
-(defn compute-random-proposer
-  [state]
-  (if (nil? (:proposal state))
-    (assoc state :proposal "blah")
-    (let [n (count (:validators state))
-          p (:proposer-idx state)
-          new-p (rand-int n)
-          h (:height state)]
-      (assoc state 
-             :proposer-idx new-p 
-             :proposal nil 
-             :height (+ h 1)
-             :pre-votes #{}))))
-
-(defn set-random-proposer
-  []
-  (swap! app-state compute-random-proposer))
-
-(defn compute-random-vote
-  [state vote-type]
-  (if (nil? (:proposal state))
-    state
-    (let [n (count (:validators state))
-          v (rand-int n)
-          votes (vote-type state)
-          new-votes (conj votes v)]
-      (assoc state vote-type new-votes))))
-
-(defn add-random-vote
-  [vote-type]
-  (swap! app-state #(compute-random-vote % vote-type)))
-
-; (defonce rand-prop (js/setInterval set-random-proposer 10000))
-; (defonce rand-pre-vote (js/setInterval #(add-random-vote :pre-votes) 200))
-
 (defn subscribe-msg
   [id evt]
   {:jsonrpc "2.0" 
@@ -296,7 +259,8 @@
   [socket]
   (subscribe socket "0" "CompleteProposal")
   (subscribe socket "1" "Vote")
-  (subscribe socket "2" "NewRound"))
+  (subscribe socket "2" "NewRound")
+  (subscribe socket "3" "ValidatorSetUpdates"))
 
 (defn handle-new-round
   [d]
@@ -338,11 +302,15 @@
         vote-type (get vote-type-map (:type d))]
     (swap! app-state #(add-vote % vote-type idx))))
 
+(defn handle-validator-set-updates
+  [d]
+  (prn d))
 
 (def event-handlers
   {"tendermint/event/NewRound" handle-new-round
    "tendermint/event/CompleteProposal" handle-complete-proposal
-   "tendermint/event/Vote" handle-vote})
+   "tendermint/event/Vote" handle-vote
+   "tendermint/event/ValidatorSetUpdates" handle-validator-set-updates})
 
 (defn handle-message
   [e]
@@ -364,6 +332,31 @@
   [host]
   (reset! websocket (ws/create (str "ws://" host "/websocket") handlers)))
 
+(defn connect-to-node
+  [node-address]
+  (get-node-status node-address)
+  (get-consensus-dump node-address)
+  (connect-to-websocket node-address))
+
+(defn connect-to-node-component []
+    [:div
+     "Node Address: " [atom-input r-node-address] 
+     [:input {:type "button" :value "Connect" :on-click #(connect-to-node @r-node-address)}]])
+
+(defn node-info-component []
+  (let [info @r-node-status]
+    (if-not (empty? info)
+     (let [address @r-node-address 
+           {:keys [id network moniker]} info] 
+       [:div (str "Connected to Network: " network " via " moniker " (" id "@" address ")")])
+     [:div (str "Not connected")])))
+
+
+(defn header []
+  [:div 
+    [connect-to-node-component]
+    [node-info-component]])
+
 (defn ^:export main []
   (let [svg-main (append-svg "#app" 1000 1500)
         svg-groups {:proposal (.append svg-main "g")
@@ -371,11 +364,8 @@
                     :blockchain (.append svg-main "g") 
                     :validators (.append svg-main "g")}
         ]
-    (add-watch app-state :update-header (partial update-graphics svg-groups))
-    ;(set-random-state 10)
-    ;(js/setTimeout set-random-proposer 50)
-    (js/setTimeout get-consensus-dump 50)
-    (js/setTimeout #(connect-to-websocket node-address) 50)
+    (add-watch app-state :state-update (partial update-graphics svg-groups))
+    (r/render [header] (js/document.getElementById "header"))
   ))
 
 (defn ^:after-load on-reload []
