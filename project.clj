@@ -11,6 +11,7 @@
                  [cljsjs/d3 "5.7.0-0"]
                  [cljs-http "0.1.45"]
                  [nilenso/wscljs "0.1.3"]
+                 [reagent "0.8.1"]
                  ]
 
   :source-paths ["src"]
