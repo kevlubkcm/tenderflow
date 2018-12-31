@@ -242,59 +242,6 @@
       (draw-proposal (:proposal svg-groups) proposal height round proposer-idx val-locs center))
     (draw-votes (:votes svg-groups) pre-votes pre-commits val-locs vote-locs height)))
 
-(defn generate-random-validator
-  [addr]
-  {:address addr
-   :voting_power (rand-int 100)
-   })
-
-(defn set-random-state
-  [n]
-  (let [vs (vec (for [i (range n)] (generate-random-validator (str i))))
-        proposer-idx (rand-int n)
-        h 0
-        r 0]
-    (reset! app-state {:validators vs 
-                       :proposer-idx proposer-idx 
-                       :height 0 
-                       :round 0
-                       :pre-votes #{}})))
-
-(defn compute-random-proposer
-  [state]
-  (if (nil? (:proposal state))
-    (assoc state :proposal "blah")
-    (let [n (count (:validators state))
-          p (:proposer-idx state)
-          new-p (rand-int n)
-          h (:height state)]
-      (assoc state 
-             :proposer-idx new-p 
-             :proposal nil 
-             :height (+ h 1)
-             :pre-votes #{}))))
-
-(defn set-random-proposer
-  []
-  (swap! app-state compute-random-proposer))
-
-(defn compute-random-vote
-  [state vote-type]
-  (if (nil? (:proposal state))
-    state
-    (let [n (count (:validators state))
-          v (rand-int n)
-          votes (vote-type state)
-          new-votes (conj votes v)]
-      (assoc state vote-type new-votes))))
-
-(defn add-random-vote
-  [vote-type]
-  (swap! app-state #(compute-random-vote % vote-type)))
-
-; (defonce rand-prop (js/setInterval set-random-proposer 10000))
-; (defonce rand-pre-vote (js/setInterval #(add-random-vote :pre-votes) 200))
-
 (defn subscribe-msg
   [id evt]
   {:jsonrpc "2.0" 
@@ -355,11 +302,9 @@
         vote-type (get vote-type-map (:type d))]
     (swap! app-state #(add-vote % vote-type idx))))
 
-
 (defn handle-validator-set-updates
   [d]
   (prn d))
-
 
 (def event-handlers
   {"tendermint/event/NewRound" handle-new-round
@@ -421,8 +366,6 @@
         ]
     (add-watch app-state :state-update (partial update-graphics svg-groups))
     (r/render [header] (js/document.getElementById "header"))
-    ;(set-random-state 10)
-    ;(js/setTimeout set-random-proposer 50)
   ))
 
 (defn ^:after-load on-reload []
