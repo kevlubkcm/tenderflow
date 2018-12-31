@@ -9,7 +9,7 @@
     [wscljs.format :as fmt]
    ))
 
-(def node-address "localhost:26657")
+(def node-address "3.80.184.123:26657")
 (defonce app-state (atom {}))
 (defonce websocket (atom nil))
 
@@ -296,7 +296,8 @@
   [socket]
   (subscribe socket "0" "CompleteProposal")
   (subscribe socket "1" "Vote")
-  (subscribe socket "2" "NewRound"))
+  (subscribe socket "2" "NewRound")
+  (subscribe socket "3" "ValidatorSetUpdates"))
 
 (defn handle-new-round
   [d]
@@ -339,10 +340,16 @@
     (swap! app-state #(add-vote % vote-type idx))))
 
 
+(defn handle-validator-set-updates
+  [d]
+  (prn d))
+
+
 (def event-handlers
   {"tendermint/event/NewRound" handle-new-round
    "tendermint/event/CompleteProposal" handle-complete-proposal
-   "tendermint/event/Vote" handle-vote})
+   "tendermint/event/Vote" handle-vote
+   "tendermint/event/ValidatorSetUpdates" handle-validator-set-updates})
 
 (defn handle-message
   [e]
@@ -371,7 +378,7 @@
                     :blockchain (.append svg-main "g") 
                     :validators (.append svg-main "g")}
         ]
-    (add-watch app-state :update-header (partial update-graphics svg-groups))
+    (add-watch app-state :state-update (partial update-graphics svg-groups))
     ;(set-random-state 10)
     ;(js/setTimeout set-random-proposer 50)
     (js/setTimeout get-consensus-dump 50)
